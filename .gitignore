@@ -1,14 +1,54 @@
-# Python-generated files
+# Python caches and build artifacts
 __pycache__/
-*.py[oc]
-*.pyc
+*.py[cod]
+*$py.class
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+.eggs/
 
 # Virtual environments
 .venv/
+venv/
+env/
+ENV/
 
-#Enviromental Variables
+# Environment files
 .env
+.env.*
+!.env.example
+
+# Uploads and local data
+uploads/
+data/
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.parquet
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Test, lint, and type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
