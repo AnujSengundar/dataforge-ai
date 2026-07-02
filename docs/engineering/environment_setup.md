@@ -84,3 +84,25 @@ uvicorn backend.main:app --reload
 ```
 
 This command is a placeholder and may change when the backend structure is finalized.
+
+## Database Migrations
+
+Alembic is configured from the project root and reads `DATABASE_URL` from the environment.
+
+Create a migration after model changes:
+
+```bash
+alembic revision --autogenerate -m "describe change"
+```
+
+Apply migrations:
+
+```bash
+alembic upgrade head
+```
+
+Check current migration state:
+
+```bash
+alembic current
+```
