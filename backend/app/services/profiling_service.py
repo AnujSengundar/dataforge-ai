@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -16,6 +16,16 @@ import polars as pl
 from backend.app.core.config import Settings
 from backend.app.models.dataset_column import DatasetColumn
 from backend.app.models.profile import DatasetProfile
+
+ENGINE_VERSION = "profiling-v1"
+DATETIME_TEXT_FORMATS = (
+    "%Y-%m-%d",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y/%m/%d",
+    "%d-%m-%Y",
+)
 
 
 class TabularDataError(Exception):
@@ -77,7 +87,7 @@ def profile_dataframe(
     signature = hashlib.sha256(
         json.dumps(definitions, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    duplicate_count = int(dataframe.is_duplicated().sum()) if row_count else 0
+    duplicate_count = _duplicate_occurrences_after_first(dataframe)
     fully_null_count = (
         int(
             dataframe.select(
@@ -89,14 +99,19 @@ def profile_dataframe(
     )
     profile = DatasetProfile(
         dataset_version_id=dataset_version_id,
-        total_rows=row_count,
-        total_columns=dataframe.width,
+        row_count=row_count,
+        column_count=dataframe.width,
         duplicate_row_count=duplicate_count,
         duplicate_row_percentage=_percentage(duplicate_count, row_count),
         fully_null_row_count=fully_null_count,
+        fully_null_row_percentage=_percentage(fully_null_count, row_count),
         estimated_memory_bytes=dataframe.estimated_size(),
-        file_size_bytes=file_size_bytes,
-        execution_duration_ms=round((time.perf_counter() - started) * 1000, 3),
+        source_file_size_bytes=file_size_bytes,
+        profiling_duration_ms=round((time.perf_counter() - started) * 1000, 3),
+        profiled_at=datetime.now(UTC),
+        warnings=[],
+        profile_summary=_column_summary(column_records),
+        engine_version=ENGINE_VERSION,
     )
     return ProfileResult(dataframe, profile, column_records, signature)
 
@@ -128,7 +143,8 @@ def _profile_column(
     non_null = series.drop_nulls()
     non_null_count = len(non_null)
     distinct_count = int(non_null.n_unique()) if non_null_count else 0
-    unique_ratio = distinct_count / non_null_count if non_null_count else 0.0
+    unique_percentage = _percentage(distinct_count, non_null_count)
+    null_percentage = _percentage(null_count, row_count)
     logical_type = infer_logical_type(series.dtype)
     minimum: str | None = None
     maximum: str | None = None
@@ -160,10 +176,35 @@ def _profile_column(
 
     sample = non_null.unique(maintain_order=True).head(settings.profile_sample_values).to_list()
     coercion_sample = non_null.head(settings.type_coercion_sample_size).cast(pl.String).to_list()
-    possible_numeric = logical_type == "string" and _all_numeric(coercion_sample)
-    possible_datetime = logical_type == "string" and _all_datetime(coercion_sample)
+    numeric_match = _match_percentage(coercion_sample, _is_numeric_text)
+    datetime_match = _match_percentage(coercion_sample, _is_datetime_text)
+    possible_numeric = (
+        logical_type in {"string", "unknown"}
+        and numeric_match >= settings.numeric_text_match_threshold
+    )
+    possible_datetime = (
+        logical_type in {"string", "unknown"}
+        and not possible_numeric
+        and datetime_match >= settings.datetime_text_match_threshold
+    )
+    candidate_identifier = _is_candidate_identifier(
+        name=name,
+        logical_type=logical_type,
+        non_null_count=non_null_count,
+        unique_percentage=unique_percentage,
+        null_percentage=null_percentage,
+        settings=settings,
+    )
+    candidate_categorical = _is_candidate_categorical(
+        logical_type=logical_type,
+        non_null_count=non_null_count,
+        distinct_count=distinct_count,
+        unique_percentage=unique_percentage,
+        is_identifier=candidate_identifier,
+        settings=settings,
+    )
     top_values: list[dict[str, object]] = []
-    if unique_ratio <= settings.categorical_unique_ratio_threshold:
+    if candidate_categorical:
         for item in non_null.value_counts(sort=True).head(settings.category_value_limit).to_dicts():
             value = item.get(name)
             count = item.get("count", 0)
@@ -178,9 +219,9 @@ def _profile_column(
         nullable=null_count > 0,
         null_count=null_count,
         non_null_count=non_null_count,
-        null_percentage=_percentage(null_count, row_count),
+        null_percentage=null_percentage,
         distinct_count=distinct_count,
-        unique_percentage=_percentage(distinct_count, non_null_count),
+        unique_percentage=unique_percentage,
         sample_values=[
             _serialize(value, max_chars=settings.profile_sample_max_chars) for value in sample
         ],
@@ -196,17 +237,9 @@ def _profile_column(
         latest_value=latest,
         is_constant=non_null_count > 0 and distinct_count == 1,
         is_fully_null=non_null_count == 0,
-        is_high_null=(null_count / row_count) >= settings.high_null_threshold
-        if row_count
-        else False,
-        is_candidate_identifier=(
-            non_null_count > 0
-            and unique_ratio >= settings.identifier_unique_ratio_threshold
-            and null_count == 0
-        ),
-        is_possible_categorical=(
-            non_null_count > 0 and unique_ratio <= settings.categorical_unique_ratio_threshold
-        ),
+        is_high_null=null_percentage >= settings.high_null_threshold if row_count else False,
+        is_candidate_identifier=candidate_identifier,
+        is_possible_categorical=candidate_categorical,
         is_possible_datetime_text=possible_datetime,
         is_possible_numeric_text=possible_numeric,
         top_values=top_values,
@@ -231,6 +264,24 @@ def infer_logical_type(dtype: pl.DataType) -> str:
 
 def _percentage(part: int, total: int) -> float:
     return round(part / total * 100, 4) if total else 0.0
+
+
+def _duplicate_occurrences_after_first(dataframe: pl.DataFrame) -> int:
+    if dataframe.height == 0:
+        return 0
+    return dataframe.height - dataframe.unique(maintain_order=False).height
+
+
+def _column_summary(columns: list[DatasetColumn]) -> dict[str, int]:
+    return {
+        "fully_null_columns": sum(column.is_fully_null for column in columns),
+        "constant_columns": sum(column.is_constant for column in columns),
+        "high_null_columns": sum(column.is_high_null for column in columns),
+        "candidate_identifiers": sum(column.is_candidate_identifier for column in columns),
+        "candidate_categoricals": sum(column.is_possible_categorical for column in columns),
+        "numeric_as_text_columns": sum(column.is_possible_numeric_text for column in columns),
+        "datetime_as_text_columns": sum(column.is_possible_datetime_text for column in columns),
+    }
 
 
 def _serialize(value: Any, *, max_chars: int = 200) -> str:
@@ -258,19 +309,76 @@ def _finite(value: float | int | None) -> float | None:
     return float(value)
 
 
-def _all_numeric(values: list[str]) -> bool:
+def _match_percentage(values: list[str], matcher: Any) -> float:
     if not values:
-        return False
+        return 0.0
+    matches = sum(1 for value in values if matcher(value))
+    return _percentage(matches, len(values))
+
+
+def _is_numeric_text(value: str) -> bool:
     numeric = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$")
-    return all(numeric.fullmatch(value.strip()) is not None for value in values)
+    return numeric.fullmatch(value.strip()) is not None
 
 
-def _all_datetime(values: list[str]) -> bool:
-    if not values:
+def _is_datetime_text(value: str) -> bool:
+    candidate = value.strip()
+    if not candidate:
         return False
-    try:
-        for value in values:
-            datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError:
+    for date_format in DATETIME_TEXT_FORMATS:
+        try:
+            datetime.strptime(candidate.replace("Z", "+0000"), date_format)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _is_candidate_identifier(
+    *,
+    name: str,
+    logical_type: str,
+    non_null_count: int,
+    unique_percentage: float,
+    null_percentage: float,
+    settings: Settings,
+) -> bool:
+    if non_null_count == 0:
         return False
-    return True
+    if unique_percentage < settings.identifier_unique_threshold:
+        return False
+    if null_percentage > settings.identifier_max_null_percentage:
+        return False
+    if logical_type == "decimal" and not _has_identifier_name_hint(name):
+        return False
+    return logical_type in {"integer", "string", "boolean", "unknown"} or _has_identifier_name_hint(
+        name
+    )
+
+
+def _has_identifier_name_hint(name: str) -> bool:
+    normalized = name.lower()
+    return (
+        normalized == "id"
+        or normalized.endswith("_id")
+        or any(hint in normalized for hint in ("code", "key"))
+    )
+
+
+def _is_candidate_categorical(
+    *,
+    logical_type: str,
+    non_null_count: int,
+    distinct_count: int,
+    unique_percentage: float,
+    is_identifier: bool,
+    settings: Settings,
+) -> bool:
+    if is_identifier or non_null_count == 0 or distinct_count <= 1:
+        return False
+    if logical_type not in {"string", "integer", "boolean"}:
+        return False
+    return (
+        unique_percentage <= settings.categorical_unique_threshold
+        and distinct_count <= settings.categorical_max_distinct
+    )

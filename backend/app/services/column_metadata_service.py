@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.config import Settings
 from backend.app.models.dataset_column import DatasetColumn
 from backend.app.models.dataset_version import DatasetVersion
+from backend.app.models.profile import DatasetProfile
 from backend.app.services.profiling_service import TabularDataError, profile_dataframe, read_tabular
 
 
@@ -38,6 +39,10 @@ def create_column_metadata(
         db.execute(
             delete(DatasetColumn).where(DatasetColumn.dataset_version_id == dataset_version_id)
         )
+        db.execute(
+            delete(DatasetProfile).where(DatasetProfile.dataset_version_id == dataset_version_id)
+        )
+        db.add(profile_result.profile)
         db.add_all(profile_result.columns)
         db.commit()
 

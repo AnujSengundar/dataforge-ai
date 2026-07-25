@@ -7,9 +7,14 @@ import pytest
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import func, select
 
-from backend.app.api.datasets import get_version_columns, upload_dataset_version
+from backend.app.api.datasets import (
+    get_version_columns,
+    get_version_profile,
+    upload_dataset_version,
+)
 from backend.app.models.dataset_column import DatasetColumn
 from backend.app.models.dataset_version import DatasetVersion
+from backend.app.models.profile import DatasetProfile
 from backend.app.services.column_metadata_service import ColumnMetadataError, create_column_metadata
 from backend.app.services.metadata_service import create_logical_dataset
 
@@ -35,7 +40,12 @@ def test_successful_csv_upload_and_metadata_creation(db_session, test_settings):
     )
 
     columns = get_version_columns(dataset.id, response.dataset_version_id, db_session)
+    profile = get_version_profile(dataset.id, response.dataset_version_id, db_session)
     assert response.status == "completed"
+    assert profile.row_count == 2
+    assert profile.column_count == 2
+    assert profile.source_file_size_bytes > 0
+    assert profile.column_summary["candidate_identifiers"] >= 0
     assert [column.column_name for column in columns] == ["name", "amount"]
     assert columns[1].logical_type == "integer"
 
@@ -59,6 +69,33 @@ def test_columns_returned_in_ordinal_order(db_session, test_settings):
 def test_nonexistent_dataset_columns_returns_404(db_session):
     with pytest.raises(HTTPException) as exc_info:
         get_version_columns(uuid.uuid4(), uuid.uuid4(), db_session)
+
+    assert exc_info.value.status_code == 404
+
+
+def test_unknown_version_profile_returns_404(db_session):
+    dataset = create_logical_dataset(db_session, name=f"profile-404-{uuid.uuid4()}")
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_version_profile(dataset.id, uuid.uuid4(), db_session)
+
+    assert exc_info.value.status_code == 404
+
+
+def test_version_belonging_to_another_dataset_is_rejected(db_session, test_settings):
+    owner = create_logical_dataset(db_session, name=f"owner-{uuid.uuid4()}")
+    other = create_logical_dataset(db_session, name=f"other-{uuid.uuid4()}")
+    response = _run(
+        upload_dataset_version(
+            owner.id,
+            _upload("owner.csv", b"id\n1\n"),
+            db_session,
+            test_settings,
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_version_profile(other.id, response.dataset_version_id, db_session)
 
     assert exc_info.value.status_code == 404
 
@@ -276,7 +313,26 @@ def test_partial_inserts_are_rolled_back(db_session, test_settings, tmp_path: Pa
             is_possible_numeric_text=False,
             top_values=[],
         )
-        return type("ProfileResultStub", (), {"columns": [duplicate_a, duplicate_b]})()
+        profile = DatasetProfile(
+            dataset_version_id=version.id,
+            row_count=1,
+            column_count=2,
+            duplicate_row_count=0,
+            duplicate_row_percentage=0,
+            fully_null_row_count=0,
+            fully_null_row_percentage=0,
+            estimated_memory_bytes=1,
+            source_file_size_bytes=version.file_size_bytes,
+            profiling_duration_ms=1,
+            warnings=[],
+            profile_summary={},
+            engine_version="test",
+        )
+        return type(
+            "ProfileResultStub",
+            (),
+            {"profile": profile, "columns": [duplicate_a, duplicate_b]},
+        )()
 
     monkeypatch.setattr(
         "backend.app.services.column_metadata_service.profile_dataframe",
@@ -363,3 +419,31 @@ def test_repeated_metadata_extraction_does_not_create_duplicate_rows(
         )
         == 2
     )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(DatasetProfile)
+            .where(DatasetProfile.dataset_version_id == version.id)
+        )
+        == 1
+    )
+
+
+def test_zero_row_file_and_all_null_column_behavior(db_session, test_settings):
+    dataset = create_logical_dataset(db_session, name=f"zero-row-{uuid.uuid4()}")
+
+    response = _run(
+        upload_dataset_version(
+            dataset.id,
+            _upload("zero.csv", b"empty\n"),
+            db_session,
+            test_settings,
+        )
+    )
+
+    profile = get_version_profile(dataset.id, response.dataset_version_id, db_session)
+    columns = get_version_columns(dataset.id, response.dataset_version_id, db_session)
+    assert profile.row_count == 0
+    assert profile.duplicate_row_percentage == 0.0
+    assert profile.fully_null_row_percentage == 0.0
+    assert columns[0].is_fully_null is True

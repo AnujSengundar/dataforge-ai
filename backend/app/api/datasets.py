@@ -1,5 +1,6 @@
 import uuid
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
@@ -28,13 +29,15 @@ from backend.app.services.metadata_service import (
     list_datasets,
 )
 
-
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 legacy_router = APIRouter(prefix="/datasets", tags=["legacy"])
 
 
 @router.post("", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED)
-def create_dataset(request: DatasetCreate, db: Session = Depends(get_db)) -> DatasetResponse:
+def create_dataset(
+    request: DatasetCreate,
+    db: Annotated[Session, Depends(get_db)],
+) -> DatasetResponse:
     try:
         dataset = create_logical_dataset(db, name=request.name, description=request.description)
     except MetadataDatabaseError as exc:
@@ -44,16 +47,19 @@ def create_dataset(request: DatasetCreate, db: Session = Depends(get_db)) -> Dat
 
 @router.get("", response_model=DatasetListResponse)
 def get_datasets(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> DatasetListResponse:
     datasets, total = list_datasets(db, limit=limit, offset=offset)
     return DatasetListResponse(items=datasets, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{dataset_id}", response_model=DatasetResponse)
-def get_dataset(dataset_id: uuid.UUID, db: Session = Depends(get_db)) -> DatasetResponse:
+def get_dataset(
+    dataset_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
+) -> DatasetResponse:
     dataset = get_dataset_by_id(db, dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found.")
@@ -63,9 +69,9 @@ def get_dataset(dataset_id: uuid.UUID, db: Session = Depends(get_db)) -> Dataset
 @router.post("/{dataset_id}/versions", response_model=UploadVersionResponse)
 async def upload_dataset_version(
     dataset_id: uuid.UUID,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    file: Annotated[UploadFile, File()],
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> UploadVersionResponse:
     try:
         result = await ingest_dataset_version(
@@ -89,9 +95,9 @@ async def upload_dataset_version(
 @router.get("/{dataset_id}/versions", response_model=DatasetVersionListResponse)
 def get_versions(
     dataset_id: uuid.UUID,
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> DatasetVersionListResponse:
     if get_dataset_by_id(db, dataset_id) is None:
         raise HTTPException(status_code=404, detail="Dataset not found.")
@@ -101,7 +107,9 @@ def get_versions(
 
 @router.get("/{dataset_id}/versions/{version_id}", response_model=DatasetVersionResponse)
 def get_version(
-    dataset_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
+    dataset_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
 ) -> DatasetVersionResponse:
     version = get_dataset_version(db, dataset_id, version_id)
     if version is None:
@@ -109,11 +117,11 @@ def get_version(
     return DatasetVersionResponse.model_validate(version)
 
 
-@router.get(
-    "/{dataset_id}/versions/{version_id}/profile", response_model=DatasetProfileResponse
-)
+@router.get("/{dataset_id}/versions/{version_id}/profile", response_model=DatasetProfileResponse)
 def get_version_profile(
-    dataset_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
+    dataset_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
 ) -> DatasetProfileResponse:
     result = get_profile(db, dataset_id, version_id)
     if result is None:
@@ -121,7 +129,11 @@ def get_version_profile(
     profile, columns = result
     response = DatasetProfileResponse.model_validate(profile)
     return response.model_copy(
-        update={"columns": [DatasetColumnResponse.model_validate(column) for column in columns]}
+        update={
+            "dataset_id": dataset_id,
+            "column_summary": profile.profile_summary,
+            "columns": [DatasetColumnResponse.model_validate(column) for column in columns],
+        }
     )
 
 
@@ -130,7 +142,9 @@ def get_version_profile(
     response_model=list[DatasetColumnResponse],
 )
 def get_version_columns(
-    dataset_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
+    dataset_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
 ) -> list[DatasetColumnResponse]:
     columns = list_columns_for_version(db, dataset_id, version_id)
     if columns is None:
@@ -146,7 +160,7 @@ def get_version_column(
     dataset_id: uuid.UUID,
     version_id: uuid.UUID,
     column_name: str,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> DatasetColumnResponse:
     columns = list_columns_for_version(db, dataset_id, version_id)
     if columns is None:
@@ -159,9 +173,9 @@ def get_version_column(
 
 @legacy_router.post("/upload", response_model=UploadVersionResponse)
 async def legacy_upload(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    file: Annotated[UploadFile, File()],
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> UploadVersionResponse:
     """Compatibility shim for the v0.1 one-step upload endpoint."""
     filename = file.filename or "dataset"
