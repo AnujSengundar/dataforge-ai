@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from backend.app.core.config import get_settings
 from backend.app.core.database import Base
-from backend.app.models import Dataset
+from backend.app.models import Dataset, DatasetColumn
 
 
 config = context.config

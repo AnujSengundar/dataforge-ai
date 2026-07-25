@@ -1,114 +1,182 @@
 import uuid
+from pathlib import Path
 
-import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from pandas.errors import EmptyDataError, ParserError
-from sqlalchemy.exc import SQLAlchemyError
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.database import get_db
-from backend.app.schemas.dataset import DatasetListResponse, DatasetResponse
-from backend.app.services.file_service import (
-    calculate_sha256,
-    save_upload_file,
-    validate_file_extension,
-    validate_file_size,
+from backend.app.schemas.dataset import (
+    DatasetCreate,
+    DatasetListResponse,
+    DatasetResponse,
+    DatasetVersionListResponse,
+    DatasetVersionResponse,
+    UploadVersionResponse,
 )
+from backend.app.schemas.dataset_column import DatasetColumnResponse
+from backend.app.schemas.profile import DatasetProfileResponse
+from backend.app.services.ingestion_service import IngestionError, ingest_dataset_version
 from backend.app.services.metadata_service import (
-    DuplicateDatasetError,
     MetadataDatabaseError,
-    create_dataset_record,
+    create_logical_dataset,
     get_dataset_by_id,
+    get_dataset_version,
+    get_profile,
+    list_columns_for_version,
+    list_dataset_versions,
     list_datasets,
 )
 
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
+legacy_router = APIRouter(prefix="/datasets", tags=["legacy"])
 
 
-@router.post(
-    "/upload",
-    response_model=DatasetResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def upload_dataset(
-    file: UploadFile,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> DatasetResponse:
-    original_filename = file.filename or ""
-    validate_file_extension(original_filename)
-    file_size_bytes = await validate_file_size(file, settings.max_upload_bytes)
-
-    stored_filename, file_path = await save_upload_file(file, settings.upload_dir)
-    file_hash = calculate_sha256(file_path)
-
+@router.post("", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED)
+def create_dataset(request: DatasetCreate, db: Session = Depends(get_db)) -> DatasetResponse:
     try:
-        dataframe = pd.read_csv(file_path)
-    except EmptyDataError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="CSV read failure. Uploaded CSV is empty or has no columns.",
-        ) from exc
-    except (ParserError, UnicodeDecodeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="CSV read failure. Unable to parse the uploaded file.",
-        ) from exc
-
-    row_count, column_count = dataframe.shape
-
-    try:
-        dataset = create_dataset_record(
-            db,
-            original_filename=original_filename,
-            stored_filename=stored_filename,
-            file_path=file_path,
-            file_hash=file_hash,
-            file_size_bytes=file_size_bytes,
-            row_count=row_count,
-            column_count=column_count,
-        )
-    except DuplicateDatasetError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Dataset with the same file hash already exists.",
-        ) from exc
+        dataset = create_logical_dataset(db, name=request.name, description=request.description)
     except MetadataDatabaseError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database failure while storing dataset metadata.",
-        ) from exc
-
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     return DatasetResponse.model_validate(dataset)
 
 
 @router.get("", response_model=DatasetListResponse)
-def get_datasets(db: Session = Depends(get_db)) -> DatasetListResponse:
-    try:
-        datasets = list_datasets(db)
-    except SQLAlchemyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database failure while listing datasets.",
-        ) from exc
-    return DatasetListResponse(datasets=datasets, count=len(datasets))
+def get_datasets(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> DatasetListResponse:
+    datasets, total = list_datasets(db, limit=limit, offset=offset)
+    return DatasetListResponse(items=datasets, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{dataset_id}", response_model=DatasetResponse)
 def get_dataset(dataset_id: uuid.UUID, db: Session = Depends(get_db)) -> DatasetResponse:
-    try:
-        dataset = get_dataset_by_id(db, dataset_id)
-    except SQLAlchemyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database failure while retrieving dataset.",
-        ) from exc
-
+    dataset = get_dataset_by_id(db, dataset_id)
     if dataset is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dataset not found.",
-        )
+        raise HTTPException(status_code=404, detail="Dataset not found.")
     return DatasetResponse.model_validate(dataset)
+
+
+@router.post("/{dataset_id}/versions", response_model=UploadVersionResponse)
+async def upload_dataset_version(
+    dataset_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> UploadVersionResponse:
+    try:
+        result = await ingest_dataset_version(
+            db, dataset_id=dataset_id, upload=file, settings=settings
+        )
+    except IngestionError as exc:
+        message = str(exc)
+        code = 404 if message == "Dataset not found." else 413 if "size limit" in message else 400
+        raise HTTPException(status_code=code, detail=message) from exc
+    version = result.version
+    return UploadVersionResponse(
+        dataset_id=dataset_id,
+        dataset_version_id=version.id,
+        version_number=version.version_number,
+        status=version.processing_status,
+        duplicate=result.duplicate,
+        profile_available=version.profile is not None,
+    )
+
+
+@router.get("/{dataset_id}/versions", response_model=DatasetVersionListResponse)
+def get_versions(
+    dataset_id: uuid.UUID,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> DatasetVersionListResponse:
+    if get_dataset_by_id(db, dataset_id) is None:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    versions, total = list_dataset_versions(db, dataset_id, limit=limit, offset=offset)
+    return DatasetVersionListResponse(items=versions, total=total, limit=limit, offset=offset)
+
+
+@router.get("/{dataset_id}/versions/{version_id}", response_model=DatasetVersionResponse)
+def get_version(
+    dataset_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
+) -> DatasetVersionResponse:
+    version = get_dataset_version(db, dataset_id, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Dataset version not found.")
+    return DatasetVersionResponse.model_validate(version)
+
+
+@router.get(
+    "/{dataset_id}/versions/{version_id}/profile", response_model=DatasetProfileResponse
+)
+def get_version_profile(
+    dataset_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
+) -> DatasetProfileResponse:
+    result = get_profile(db, dataset_id, version_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Dataset profile not found.")
+    profile, columns = result
+    response = DatasetProfileResponse.model_validate(profile)
+    return response.model_copy(
+        update={"columns": [DatasetColumnResponse.model_validate(column) for column in columns]}
+    )
+
+
+@router.get(
+    "/{dataset_id}/versions/{version_id}/columns",
+    response_model=list[DatasetColumnResponse],
+)
+def get_version_columns(
+    dataset_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
+) -> list[DatasetColumnResponse]:
+    columns = list_columns_for_version(db, dataset_id, version_id)
+    if columns is None:
+        raise HTTPException(status_code=404, detail="Dataset version not found.")
+    return [DatasetColumnResponse.model_validate(column) for column in columns]
+
+
+@router.get(
+    "/{dataset_id}/versions/{version_id}/columns/{column_name}",
+    response_model=DatasetColumnResponse,
+)
+def get_version_column(
+    dataset_id: uuid.UUID,
+    version_id: uuid.UUID,
+    column_name: str,
+    db: Session = Depends(get_db),
+) -> DatasetColumnResponse:
+    columns = list_columns_for_version(db, dataset_id, version_id)
+    if columns is None:
+        raise HTTPException(status_code=404, detail="Dataset version not found.")
+    column = next((item for item in columns if item.column_name == column_name), None)
+    if column is None:
+        raise HTTPException(status_code=404, detail="Dataset column not found.")
+    return DatasetColumnResponse.model_validate(column)
+
+
+@legacy_router.post("/upload", response_model=UploadVersionResponse)
+async def legacy_upload(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> UploadVersionResponse:
+    """Compatibility shim for the v0.1 one-step upload endpoint."""
+    filename = file.filename or "dataset"
+    dataset = create_logical_dataset(db, name=Path(filename).stem or "dataset")
+    try:
+        result = await ingest_dataset_version(
+            db, dataset_id=dataset.id, upload=file, settings=settings
+        )
+    except IngestionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return UploadVersionResponse(
+        dataset_id=dataset.id,
+        dataset_version_id=result.version.id,
+        version_number=result.version.version_number,
+        status=result.version.processing_status,
+        duplicate=result.duplicate,
+        profile_available=True,
+    )

@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import HTTPException, UploadFile, status
 
 
-ALLOWED_EXTENSIONS = {".csv"}
+ALLOWED_EXTENSIONS = {".csv", ".parquet"}
 
 
 def validate_file_extension(filename: str) -> None:
@@ -14,7 +14,7 @@ def validate_file_extension(filename: str) -> None:
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file type. Only .csv files are supported.",
+            detail="Invalid file type. Only .csv and .parquet files are supported.",
         )
 
 

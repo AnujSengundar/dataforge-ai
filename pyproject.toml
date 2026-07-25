@@ -8,6 +8,8 @@ dependencies = [
     "alembic>=1.17.2",
     "fastapi>=0.116.0",
     "pandas>=3.0.3",
+    "polars>=1.31.0",
+    "pyarrow>=20.0.0",
     "psycopg2-binary>=2.9.12",
     "pydantic>=2.13.4",
     "python-multipart>=0.0.20",
@@ -15,3 +17,23 @@ dependencies = [
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.35.0",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=1.16.0",
+    "pytest>=8.4.0",
+    "pytest-cov>=6.2.0",
+    "ruff>=0.12.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
