@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.app.core.database import get_db
 from backend.turning_point.cases import CASES, Case
+from backend.turning_point.database import get_db
 from backend.turning_point.investigator import Result, investigate
 from backend.turning_point.storage import Investigation
 

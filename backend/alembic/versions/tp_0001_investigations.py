@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "tp_0001"
-down_revision = "20260725_0005"
+down_revision = None
 
 
 def upgrade() -> None:

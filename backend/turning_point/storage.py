@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import JSON, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.core.database import Base
+from backend.turning_point.database import Base
 
 
 class Investigation(Base):

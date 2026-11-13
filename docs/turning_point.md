@@ -31,8 +31,7 @@ ruff format --check backend/turning_point tests/test_turning_point.py
 Check the browser module with `node --input-type=module --check < backend/turning_point/web/studio.js`
 (in PowerShell, use `Get-Content -Raw backend/turning_point/web/studio.js | node --input-type=module --check`).
 
-The first automated run passed 45 tests across Turning Point and the prior backend. Turning Point
-checks the chase total and rate, persists a review linked to its original, resolves evidence IDs,
+The Turning Point suite checks the chase total and rate, persists a linked review, resolves evidence IDs,
 withholds a verdict for missing timing, rejects a hidden citation, and exercises a verdict revision
 using a controlled model response. These results verify application behavior, not Ollama model
 quality. Live model performance should be reported separately from controlled tests.

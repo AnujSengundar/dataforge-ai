@@ -1,18 +1,14 @@
 [project]
-name = "dataforge-ai"
+name = "turning-point"
 version = "0.1.0"
-description = "Add your description here"
+description = "An evidence-backed AI investigation studio for fans"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.17.2",
     "fastapi>=0.116.0",
-    "pandas>=3.0.3",
-    "polars>=1.31.0",
-    "pyarrow>=20.0.0",
     "psycopg2-binary>=2.9.12",
     "pydantic>=2.13.4",
-    "python-multipart>=0.0.20",
     "python-dotenv>=1.2.2",
     "sqlalchemy>=2.0.51",
     "uvicorn>=0.35.0",

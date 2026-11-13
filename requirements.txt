@@ -1,11 +1,7 @@
 psycopg2-binary
 sqlalchemy
-pandas
-polars
-pyarrow
 python-dotenv
 alembic
 fastapi
 pydantic
 uvicorn
-python-multipart

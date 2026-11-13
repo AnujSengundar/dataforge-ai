@@ -10,7 +10,9 @@ An AI investigation studio for fans: test a claim about a real match, race, or a
 
 ## Run Locally
 
-Requires Python 3.12 and a local PostgreSQL database. Set `DATABASE_URL` in `.env` using [the example](.env.example). Run from the repository root with the virtual environment activated:
+Requires Python 3.12 and a dedicated PostgreSQL database named `turning_point`.
+Set `TURNING_POINT_DATABASE_URL` in `.env` using [the example](.env.example). Do not point it
+at the previous DataForge database. Run from the repository root with the virtual environment activated:
 
 ```sh
 python -m pip install -r requirements.txt
@@ -40,9 +42,8 @@ current case and spoiler level. PostgreSQL stores the original and reviewed resu
 including source version, model, tool names, and elapsed time.
 
 The release is local-first: three curated cases, no live feeds, simulations, open uploads, or public
-multi-user deployment. Prior DataForge code and migrations are retained for compatibility; its
-upload endpoints are not mounted in Turning Point. The original sprint branches remain separate.
+multi-user deployment. Turning Point is the only application on this branch. The previous
+DataForge implementation and migration history remain on the original sprint branches.
 
-See [evidence sources and evaluation](docs/turning_point.md) and the
-[contribution guide](docs/engineering/contribution_guide.md). The application code has no
+See [evidence sources and evaluation](docs/turning_point.md). The application code has no
 declared license; third-party data and referenced works have separate terms.

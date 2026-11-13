@@ -6,9 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from backend.app.core.database import get_db
 from backend.turning_point import investigator
 from backend.turning_point.cases import CASES
+from backend.turning_point.database import get_db
 from backend.turning_point.investigator import Finding, Plan, investigate
 from backend.turning_point.main import app
 from backend.turning_point.storage import Investigation
