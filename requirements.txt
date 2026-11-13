@@ -1,4 +1,7 @@
 psycopg2-binary
 sqlalchemy
-pandas
 python-dotenv
+alembic
+fastapi
+pydantic
+uvicorn

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turning Point</title>
+  <link rel="stylesheet" href="/assets/studio.css">
+  <script type="module" src="/assets/studio.js"></script>
+</head>
+<body>
+  <header><div class="brand"><span aria-hidden="true">↳</span> Turning Point</div><span class="edition">INVESTIGATION STUDIO</span></header>
+  <main>
+    <nav id="cases" aria-label="Case library"></nav>
+    <section class="case-heading">
+      <p class="eyebrow" id="domain"></p>
+      <h1 id="title">Case library</h1>
+      <p id="subtitle"></p>
+    </section>
+    <div class="workspace">
+      <section class="timeline">
+        <div class="section-heading"><h2>Evidence timeline</h2><span id="count"></span></div>
+        <div id="chart"></div>
+        <label id="spoiler" hidden><input type="checkbox" id="reveal"> Include Liore reveal</label>
+        <ol id="events" tabindex="0" aria-label="Timeline events"></ol>
+        <footer id="sources"></footer>
+      </section>
+      <section class="investigation">
+        <div class="section-heading"><h2>Investigation</h2><span>CASE FILE</span></div>
+        <form id="form">
+          <label for="claim">Claim to test</label>
+          <textarea id="claim" rows="3" minlength="3" maxlength="400" required></textarea>
+          <button class="primary" id="run">Investigate <span aria-hidden="true">→</span></button>
+        </form>
+        <p id="status" role="status"></p>
+        <div id="results"></div>
+        <button id="challenge" class="secondary" hidden>Make the opposing case <span aria-hidden="true">↗</span></button>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
