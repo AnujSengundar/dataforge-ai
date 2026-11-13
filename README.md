@@ -1,123 +1,48 @@
-# DataForge AI Studio
+# Turning Point
 
-DataForge AI Studio is a SaaS-style data platform that turns raw CSV and Excel files into profiled, warehouse-ready, AI-assisted business intelligence.
+An AI investigation studio for fans: test a claim about a real match, race, or adaptation, then challenge the verdict with evidence.
 
-## Problem Statement
+| Case | Question | Evidence |
+| --- | --- | --- |
+| 2016 T20 World Cup final | Did England lose it in the final over? | All 124 chase deliveries, required run rate, wickets, and scoring windows |
+| 2021 Monaco Grand Prix | Did Vettel's later stop gain him position? | Pit-lane transit, rejoin order, and classification |
+| Fullmetal Alchemist vs Brotherhood | Does the anime prime viewers to question Cornello earlier? | Side-by-side scene annotations with an opt-in reveal |
 
-Freelancers, analysts, founders, and small businesses often work with important data trapped in messy spreadsheets and exports. Before they can make decisions, they need to inspect file quality, infer schemas, clean columns, load data into a database, create analytical models, build dashboards, and explain the results.
+## Run Locally
 
-DataForge AI Studio is designed to compress that workflow into a structured analytics studio: upload data, profile it, store metadata, load it into PostgreSQL, generate insights, and prepare it for dashboards, AI chat, ML, and executive reporting.
+Requires Python 3.12 and a local PostgreSQL database. Set `DATABASE_URL` in `.env` using [the example](.env.example). Run from the repository root with the virtual environment activated:
 
-## Key Features
-
-- CSV upload and dataset preview.
-- Schema inference and metadata capture.
-- Automated data profiling and quality summaries.
-- Raw data loading into PostgreSQL staging tables.
-- Warehouse-ready modeling path for curated analytics.
-- Basic summary insights for uploaded datasets.
-- Power BI-ready reporting layer.
-- Planned AI chat over dataset metadata and warehouse context.
-- Planned Ollama, RAG, MCP, and ML integrations.
-
-## High-Level Architecture
-
-DataForge AI Studio is organized around a modular local-first architecture:
-
-- Frontend for upload, preview, insights, reports, and chat.
-- FastAPI backend for orchestration and API boundaries.
-- PostgreSQL metadata database for datasets, profiles, schemas, and processing state.
-- PostgreSQL warehouse for raw, staging, curated, and analytical tables.
-- ETL and profiling services for data processing.
-- AI and ML services for advanced analytics workflows.
-- MCP server for exposing platform tools to AI agents.
-- Power BI layer for dashboards and executive reporting.
-
-See [System Architecture](docs/architecture/system_architecture.md) and [Data Flow](docs/architecture/data_flow.md).
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | Python, FastAPI |
-| Database | PostgreSQL |
-| ORM and migrations | SQLAlchemy, Alembic |
-| Data processing | Pandas |
-| Data quality | Great Expectations or Pandera |
-| BI | Power BI |
-| AI | Ollama, RAG with ChromaDB or Qdrant |
-| Agent tooling | MCP |
-| Frontend | Next.js or React |
-| DevOps | Docker, Docker Compose, GitHub Actions |
-
-See [Tech Stack](docs/architecture/tech_stack.md).
-
-## Current Status
-
-Sprint 1 is focused on Product & Engineering Foundation.
-
-Completed so far:
-
-- Repository initialized.
-- PostgreSQL connection verified.
-- Environment variables configured.
-- Product vision and scope documented.
-- System architecture and data flow documented.
-- Engineering standards and contribution workflow added.
-
-No production backend implementation has been added yet.
-
-## Roadmap
-
-- Sprint 1: Product & Engineering Foundation.
-- Sprint 2: Metadata Engine.
-- Sprint 3: Profiling Engine.
-- Sprint 4: Warehouse Ingestion.
-- Sprint 5: Analytics API.
-- Sprint 6: Power BI Layer.
-- Sprint 7: ML Layer.
-- Sprint 8: AI + Ollama + MCP.
-- Sprint 9: Portfolio Website + Deployment.
-
-See [Sprint Plan](docs/engineering/sprint_plan.md).
-
-## Repository Structure
-
-```text
-dataforge-ai/
-├── backend/                 # Future FastAPI application code
-├── docker/                  # Docker and local infrastructure assets
-├── docs/
-│   ├── architecture/        # System architecture, data flow, ADRs, tech stack
-│   ├── engineering/         # Standards, setup, branching, contribution docs
-│   └── product/             # Vision, personas, feature scope, MVP requirements
-├── etl/                     # Future ingestion and transformation services
-├── powerbi/                 # Future Power BI files and semantic model assets
-├── tests/                   # Future automated tests
-├── warehouse/               # Future SQL models and warehouse scripts
-├── .env.example             # Example local environment variables
-├── pyproject.toml           # Python project configuration
-└── requirements.txt         # Python dependencies
+```sh
+python -m pip install -r requirements.txt
+alembic upgrade head
+python -m uvicorn backend.turning_point.main:app --port 8765
 ```
 
-## Local Setup
+Open [Turning Point](http://127.0.0.1:8765) or the [API reference](http://127.0.0.1:8765/docs).
+To enable AI, start Ollama and run `ollama pull qwen2.5:1.5b`. Override the model or endpoint with
+`TURNING_POINT_MODEL` or `TURNING_POINT_OLLAMA`. If the model is missing or returns invalid
+evidence, the result is marked **evidence-only**. Suggested claims have a curated fallback;
+custom claims without a valid model result are marked insufficient.
 
-Local setup will be expanded as the backend implementation is introduced.
+## Three-Minute Walkthrough
 
-For now:
+1. Open **Cricket** and investigate the suggested claim.
+2. Open the citation for the required rate entering the last over. West Indies needed 19 from six legal balls.
+3. Select **Make the opposing case**. Compare the verdicts and inspect the earlier scoring window.
+4. Switch to **Formula 1** to compare pit-lane times, or **Adaptations** to compare openings without enabling the reveal.
 
-1. Install Python 3.11 or 3.12.
-2. Install PostgreSQL locally or run it through Docker later.
-3. Create a virtual environment.
-4. Install dependencies from `requirements.txt`.
-5. Copy `.env.example` to `.env` and adjust values for your machine.
+## Design
 
-See [Environment Setup](docs/engineering/environment_setup.md).
+FastAPI serves the case library, investigation API, and browser UI. Python computes sports facts
+from pinned evidence; Ollama chooses bounded tools and classifies claims against their results.
+The model can return fact IDs, not new evidence text. The server checks citations against the
+current case and spoiler level. PostgreSQL stores the original and reviewed results separately,
+including source version, model, tool names, and elapsed time.
 
-## Contributing
+The release is local-first: three curated cases, no live feeds, simulations, open uploads, or public
+multi-user deployment. Prior DataForge code and migrations are retained for compatibility; its
+upload endpoints are not mounted in Turning Point. The original sprint branches remain separate.
 
-See [Contribution Guide](docs/engineering/contribution_guide.md) and [Coding Standards](docs/engineering/coding_standards.md).
-
-## License
-
-License to be decided. Until a license is added, all rights are reserved by the project owner.
+See [evidence sources and evaluation](docs/turning_point.md) and the
+[contribution guide](docs/engineering/contribution_guide.md). The application code has no
+declared license; third-party data and referenced works have separate terms.

@@ -3,10 +3,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from backend.app import models  # noqa: F401
 from backend.app.core.config import get_settings
 from backend.app.core.database import Base
-from backend.app.models import Dataset, DatasetColumn
-
+from backend.turning_point import storage  # noqa: F401
 
 config = context.config
 
